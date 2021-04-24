@@ -2,10 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/dgraph-io/badger/v2"
-	"github.com/hashicorp/raft"
-	"github.com/hashicorp/raft-boltdb"
-	"github.com/spf13/viper"
 	"log"
 	"net"
 	"os"
@@ -13,6 +9,11 @@ import (
 	"time"
 	"ysf/raftsample/fsm"
 	"ysf/raftsample/server"
+
+	"github.com/hashicorp/raft"
+	"github.com/spf13/viper"
+	"github.com/tidwall/buntdb"
+	fastlog "github.com/tidwall/raft-fastlog"
 )
 
 // configRaft configuration for raft node
@@ -91,29 +92,32 @@ func main() {
 
 	log.Printf("%+v\n", conf)
 
-	// Preparing badgerDB
-	badgerOpt := badger.DefaultOptions(conf.Raft.VolumeDir)
-	badgerDB, err := badger.Open(badgerOpt)
+	// Preparing buntdb
+	buntDB, err := buntdb.Open("data.db")
 	if err != nil {
 		log.Fatal(err)
 		return
 	}
 
 	defer func() {
-		if err := badgerDB.Close(); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "error close badgerDB: %s\n", err.Error())
+		if err := buntDB.Close(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "error close buntDB: %s\n", err.Error())
 		}
 	}()
 
-	var raftBinAddr = fmt.Sprintf(":%d", conf.Raft.Port)
+	var raftBinAddr = fmt.Sprintf("127.0.0.1:%d", conf.Raft.Port)
 
 	raftConf := raft.DefaultConfig()
 	raftConf.LocalID = raft.ServerID(conf.Raft.NodeId)
 	raftConf.SnapshotThreshold = 1024
 
-	fsmStore := fsm.NewBadger(badgerDB)
+	fsmStore := fsm.NewBuntDB(buntDB)
 
-	store, err := raftboltdb.NewBoltStore(filepath.Join(conf.Raft.VolumeDir, "raft.dataRepo"))
+	if _, err := os.Stat(conf.Raft.VolumeDir); os.IsNotExist(err) {
+		os.Mkdir(conf.Raft.VolumeDir, 0755)
+	}
+
+	store, err := fastlog.NewFastLogStore(filepath.Join(conf.Raft.VolumeDir, "raft.dataRepo"), fastlog.High, nil)
 	if err != nil {
 		log.Fatal(err)
 		return
@@ -137,7 +141,6 @@ func main() {
 		log.Fatal(err)
 		return
 	}
-
 	transport, err := raft.NewTCPTransport(raftBinAddr, tcpAddr, maxPool, tcpTimeout, os.Stdout)
 	if err != nil {
 		log.Fatal(err)
@@ -162,7 +165,7 @@ func main() {
 
 	raftServer.BootstrapCluster(configuration)
 
-	srv := server.New(fmt.Sprintf(":%d", conf.Server.Port), badgerDB, raftServer)
+	srv := server.New(fmt.Sprintf(":%d", conf.Server.Port), buntDB, raftServer)
 	if err := srv.Start(); err != nil {
 		log.Fatal(err)
 	}

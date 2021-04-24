@@ -1,15 +1,17 @@
 package server
 
 import (
-	"github.com/dgraph-io/badger/v2"
-	"github.com/hashicorp/raft"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"net/http"
 	_ "net/http/pprof"
 	"time"
 	"ysf/raftsample/server/raft_handler"
 	"ysf/raftsample/server/store_handler"
+
+	"github.com/tidwall/buntdb"
+
+	"github.com/hashicorp/raft"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 )
 
 // srv struct handling server
@@ -29,7 +31,7 @@ func (s srv) Start() error {
 }
 
 // New return new server
-func New(listenAddr string, badgerDB *badger.DB, r *raft.Raft) *srv {
+func New(listenAddr string, buntDB *buntdb.DB, r *raft.Raft) *srv {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -43,7 +45,7 @@ func New(listenAddr string, badgerDB *badger.DB, r *raft.Raft) *srv {
 	e.GET("/raft/stats", raftHandler.StatsRaftHandler)
 
 	// Store server
-	storeHandler := store_handler.New(r, badgerDB)
+	storeHandler := store_handler.New(r, buntDB)
 	e.POST("/store", storeHandler.Store)
 	e.GET("/store/:key", storeHandler.Get)
 	e.DELETE("/store/:key", storeHandler.Delete)

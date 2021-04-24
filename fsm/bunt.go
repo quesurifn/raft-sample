@@ -3,37 +3,30 @@ package fsm
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/dgraph-io/badger/v2"
-	"github.com/hashicorp/raft"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/hashicorp/raft"
+	"github.com/tidwall/buntdb"
 )
 
-// badgerFSM raft.FSM implementation using badgerDB
-type badgerFSM struct {
-	db *badger.DB
+// buntFSM raft.FSM implementation using BuntDB
+type buntFSM struct {
+	db *buntdb.DB
 }
 
-// get fetch data from badgerDB
-func (b badgerFSM) get(key string) (interface{}, error) {
-	var keyByte = []byte(key)
+// get fetch data from BuntDB
+func (b buntFSM) get(key string) (interface{}, error) {
 	var data interface{}
-
-	txn := b.db.NewTransaction(false)
-	defer func() {
-		_ = txn.Commit()
-	}()
-
-	item, err := txn.Get(keyByte)
-	if err != nil {
-		data = map[string]interface{}{}
-		return data, err
-	}
-
-	var value = make([]byte, 0)
-	err = item.Value(func(val []byte) error {
-		value = append(value, val...)
+	err := b.db.View(func(tx *buntdb.Tx) error {
+		val, err := tx.Get(key)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal([]byte(val), &data); err != nil {
+			return nil
+		}
 		return nil
 	})
 
@@ -42,20 +35,11 @@ func (b badgerFSM) get(key string) (interface{}, error) {
 		return data, err
 	}
 
-	if value != nil && len(value) > 0 {
-		err = json.Unmarshal(value, &data)
-	}
-
-	if err != nil {
-		data = map[string]interface{}{}
-	}
-
 	return data, err
 }
 
-// set store data to badgerDB
-func (b badgerFSM) set(key string, value interface{}) error {
-	var data = make([]byte, 0)
+// set store data to BuntDB
+func (b buntFSM) set(key string, value interface{}) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -65,34 +49,29 @@ func (b badgerFSM) set(key string, value interface{}) error {
 		return nil
 	}
 
-	txn := b.db.NewTransaction(true)
-	err = txn.Set([]byte(key), data)
-	if err != nil {
-		txn.Discard()
-		return err
-	}
-
-	return txn.Commit()
+	err = b.db.Update(func(tx *buntdb.Tx) error {
+		if _, _, err := tx.Set(key, string(data), nil); err != nil {
+			return err
+		}
+		return nil
+	})
+	return err
 }
 
-// delete remove data from badgerDB
-func (b badgerFSM) delete(key string) error {
-	var keyByte = []byte(key)
-
-	txn := b.db.NewTransaction(true)
-	err := txn.Delete(keyByte)
-	if err != nil {
+// delete remove data from BuntDB
+func (b buntFSM) delete(key string) error {
+	err := b.db.Update(func(tx *buntdb.Tx) error {
+		_, err := tx.Delete(key)
 		return err
-	}
-
-	return txn.Commit()
+	})
+	return err
 }
 
 // Apply log is invoked once a log entry is committed.
 // It returns a value which will be made available in the
 // ApplyFuture returned by Raft.Apply method if that
 // method was called on the same Raft node as the FSM.
-func (b badgerFSM) Apply(log *raft.Log) interface{} {
+func (b buntFSM) Apply(log *raft.Log) interface{} {
 	switch log.Type {
 	case raft.LogCommand:
 		var payload = CommandPayload{}
@@ -129,16 +108,16 @@ func (b badgerFSM) Apply(log *raft.Log) interface{} {
 
 // Snapshot will be called during make snapshot.
 // Snapshot is used to support log compaction.
-// No need to call snapshot since it already persisted in disk (using BadgerDB) when raft calling Apply function.
-func (b badgerFSM) Snapshot() (raft.FSMSnapshot, error) {
+// No need to call snapshot since it already persisted in disk (using BuntDB) when raft calling Apply function.
+func (b buntFSM) Snapshot() (raft.FSMSnapshot, error) {
 	return newSnapshotNoop()
 }
 
 // Restore is used to restore an FSM from a Snapshot. It is not called
 // concurrently with any other command. The FSM must discard all previous
 // state.
-// Restore will update all data in BadgerDB
-func (b badgerFSM) Restore(rClose io.ReadCloser) error {
+// Restore will update all data in BuntDB
+func (b buntFSM) Restore(rClose io.ReadCloser) error {
 	defer func() {
 		if err := rClose.Close(); err != nil {
 			_, _ = fmt.Fprintf(os.Stdout, "[FINALLY RESTORE] close error %s\n", err.Error())
@@ -176,9 +155,9 @@ func (b badgerFSM) Restore(rClose io.ReadCloser) error {
 	return nil
 }
 
-// NewBadger raft.FSM implementation using badgerDB
-func NewBadger(badgerDB *badger.DB) raft.FSM {
-	return &badgerFSM{
-		db: badgerDB,
+// NewBuntDB raft.FSM implementation using buntdb
+func NewBuntDB(buntDB *buntdb.DB) raft.FSM {
+	return &buntFSM{
+		db: buntDB,
 	}
 }

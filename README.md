@@ -11,7 +11,7 @@ Copying statement from [another raft repo example](https://github.com/yongman/le
 
 > You can have better comprehension about how `raft protocol` works if you use it. 
 
-And, yes! This is another example of implementing Raft using BadgerDB.
+And, yes! This is another example of implementing Raft using BuntDB.
 
 ## What the difference with another example repo?
 
@@ -59,7 +59,7 @@ Using Postman, we can register http://localhost:2222 as a Follower to http://loc
 curl --location --request POST 'localhost:2221/raft/join' \
 --header 'Content-Type: application/json' \
 --data-raw '{
-	"node_id": "node_2", 
+	"node_id": "node_2",
 	"raft_address": "127.0.0.1:1112"
 }'
 ```
@@ -136,9 +136,9 @@ This makes all Get command can be targeted to any server, not only the Leader.
 
 So, why we call it _eventual consistency in read_ while we can make sure that every after Store and Delete response returned it means that the raft already applied the logs to n quorum servers?
 
-That is because while reading data directly in badgerDB we only use read transaction. From BadgerDB's Readme:
+That is because while reading data directly in BuntDB we only use read transaction. From BuntDB's Readme:
 
-> You cannot perform any writes or deletes within this transaction. Badger ensures that you get a consistent view of the database within this closure. Any writes that happen elsewhere after the transaction has started, will not be seen by calls made within the closure.
+> You cannot perform any writes or deletes within this transaction. Bunt ensures that you get a consistent view of the database within this closure. Any writes that happen elsewhere after the transaction has started, will not be seen by calls made within the closure.
 
 To do store data, use this cURL (change `raft.leader.server` to the Leader HTTP address, in this example http://localhost:2221):
 
